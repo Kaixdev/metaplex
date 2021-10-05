@@ -1821,6 +1821,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "arrayref",
+ "spl-associated-token-account",
  "spl-token",
  "spl-token-metadata",
 ]
@@ -3534,6 +3535,23 @@ dependencies = [
  "solana-sdk",
  "spl-token",
  "thiserror",
+]
+
+[[package]]
+name = "spl-auction-test-client"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "borsh",
+ "clap",
+ "rand 0.8.4",
+ "solana-clap-utils",
+ "solana-cli-config",
+ "solana-client",
+ "solana-program",
+ "solana-sdk",
+ "spl-auction",
+ "spl-token",
 ]
 
 [[package]]

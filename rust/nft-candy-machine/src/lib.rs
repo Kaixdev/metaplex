@@ -17,7 +17,8 @@ use {
     std::cell::Ref,
 };
 
-const PREFIX: &str = "candy_machine";
+const PREFIX: &str = "exclusive_candy_machine";
+
 #[program]
 pub mod nft_candy_machine {
     use anchor_lang::solana_program::{
@@ -27,29 +28,22 @@ pub mod nft_candy_machine {
 
     use super::*;
 
-    pub fn mint_nft<'info>(ctx: Context<'_, '_, '_, 'info, MintNFT<'info>>) -> ProgramResult {
+    pub fn mint_nft<'info>(ctx: Context<'_, '_, '_, 'info, MintNFT<'info>>, invoke_airdrop: bool) -> ProgramResult {
         let candy_machine = &mut ctx.accounts.candy_machine;
         let config = &ctx.accounts.config;
         let clock = &ctx.accounts.clock;
 
-        match candy_machine.data.go_live_date {
-            None => {
-                if *ctx.accounts.payer.key != candy_machine.authority {
-                    return Err(ErrorCode::CandyMachineNotLiveYet.into());
-                }
-            }
-            Some(val) => {
-                if clock.unix_timestamp < val {
-                    if *ctx.accounts.payer.key != candy_machine.authority {
-                        return Err(ErrorCode::CandyMachineNotLiveYet.into());
-                    }
-                }
+        if candy_machine.data.current_phase < 0 {
+            return Err(ErrorCode::CandyMachineNotLiveYet.into());
+        } else {
+  
+            if candy_machine.items_redeemed >= candy_machine.data.total_unlocked[candy_machine.data.current_phase as usize] {
+                return Err(ErrorCode::CandyMachineEmpty.into());
             }
         }
 
-        if candy_machine.items_redeemed >= candy_machine.data.items_available {
-            return Err(ErrorCode::CandyMachineEmpty.into());
-        }
+        let price : u64 = candy_machine.data.prices[candy_machine.data.current_phase as usize];
+        
 
         if let Some(mint) = candy_machine.token_mint {
             let token_account_info = &ctx.remaining_accounts[0];
@@ -62,7 +56,7 @@ pub mod nft_candy_machine {
                 return Err(ErrorCode::MintMismatch.into());
             }
 
-            if token_account.amount < candy_machine.data.price {
+            if token_account.amount < price {
                 return Err(ErrorCode::NotEnoughTokens.into());
             }
 
@@ -72,10 +66,10 @@ pub mod nft_candy_machine {
                 authority: transfer_authority_info.clone(),
                 authority_signer_seeds: &[],
                 token_program: ctx.accounts.token_program.clone(),
-                amount: candy_machine.data.price,
+                amount: price,
             })?;
         } else {
-            if ctx.accounts.payer.lamports() < candy_machine.data.price {
+            if ctx.accounts.payer.lamports() < price {
                 return Err(ErrorCode::NotEnoughSOL.into());
             }
 
@@ -83,7 +77,7 @@ pub mod nft_candy_machine {
                 &system_instruction::transfer(
                     &ctx.accounts.payer.key,
                     ctx.accounts.wallet.key,
-                    candy_machine.data.price,
+                    price,
                 ),
                 &[
                     ctx.accounts.payer.clone(),
@@ -93,40 +87,56 @@ pub mod nft_candy_machine {
             )?;
         }
 
-        let config_line = get_config_line(
-            &config.to_account_info(),
-            candy_machine.items_redeemed as usize,
-        )?;
 
-        candy_machine.items_redeemed = candy_machine
-            .items_redeemed
-            .checked_add(1)
-            .ok_or(ErrorCode::NumericalOverflowError)?;
-
-        let config_key = config.key();
-        let authority_seeds = [
-            PREFIX.as_bytes(),
-            config_key.as_ref(),
-            candy_machine.data.uuid.as_bytes(),
-            &[candy_machine.bump],
-        ];
-
-        let mut creators: Vec<spl_token_metadata::state::Creator> =
-            vec![spl_token_metadata::state::Creator {
-                address: candy_machine.key(),
-                verified: true,
-                share: 0,
-            }];
-
-        for c in &config.data.creators {
-            creators.push(spl_token_metadata::state::Creator {
-                address: c.address,
-                verified: false,
-                share: c.share,
-            });
+        let mut mint_count = 1;
+        
+        if invoke_airdrop {
+            if *ctx.accounts.payer.key != candy_machine.authority {
+                return Err(ErrorCode::AirdropIncorrectCaller.into());
+            }
+            mint_count = candy_machine.data.airdrop_amount; 
+            candy_machine.data.airdrop_amount = 0;
         }
+        
 
-        let metadata_infos = vec![
+        while mint_count > 0
+        {
+            mint_count -= 1;
+
+            let config_line = get_config_line(
+                &config.to_account_info(),
+                candy_machine.items_redeemed as usize,
+            )?;
+    
+            candy_machine.items_redeemed = candy_machine
+                .items_redeemed
+                .checked_add(1)
+                .ok_or(ErrorCode::NumericalOverflowError)?;
+
+            let config_key = config.key();
+            let authority_seeds = [
+                PREFIX.as_bytes(),
+                config_key.as_ref(),
+                candy_machine.data.uuid.as_bytes(),
+                &[candy_machine.bump],
+            ];
+    
+            let mut creators: Vec<spl_token_metadata::state::Creator> =
+                vec![spl_token_metadata::state::Creator {
+                    address: candy_machine.key(),
+                    verified: true,
+                    share: 0,
+                }];
+    
+            for c in &config.data.creators {
+                creators.push(spl_token_metadata::state::Creator {
+                    address: c.address,
+                    verified: false,
+                    share: c.share,
+                });
+            }
+
+            let metadata_infos = vec![
             ctx.accounts.metadata.clone(),
             ctx.accounts.mint.clone(),
             ctx.accounts.mint_authority.clone(),
@@ -164,7 +174,7 @@ pub mod nft_candy_machine {
                 config_line.uri,
                 Some(creators),
                 config.data.seller_fee_basis_points,
-                true,
+                false,
                 config.data.is_mutable,
             ),
             metadata_infos.as_slice(),
@@ -209,23 +219,29 @@ pub mod nft_candy_machine {
             &[&authority_seeds],
         )?;
 
+        }
+        
+        
+
         Ok(())
     }
 
     pub fn update_candy_machine(
         ctx: Context<UpdateCandyMachine>,
-        price: Option<u64>,
-        go_live_date: Option<i64>,
-    ) -> ProgramResult {
+        prices: Option<Vec<u64>>,
+        current_phase: Option<i64>,) -> ProgramResult {
         let candy_machine = &mut ctx.accounts.candy_machine;
 
-        if let Some(p) = price {
-            candy_machine.data.price = p;
+        if let Some(p) = prices {
+            if p.len() != candy_machine.data.total_unlocked.len() {
+                return Err(ErrorCode::PriceAndUnlocksMismatch.into());
+            }
+            candy_machine.data.prices = p;
         }
 
-        if let Some(go_l) = go_live_date {
-            msg!("Go live date changed to {}", go_l);
-            candy_machine.data.go_live_date = Some(go_l)
+        if let Some(cp) = current_phase {
+            msg!("Current phase changed to {}", cp);
+            candy_machine.data.current_phase = cp; 
         }
         Ok(())
     }
@@ -280,8 +296,7 @@ pub mod nft_candy_machine {
     pub fn add_config_lines(
         ctx: Context<AddConfigLines>,
         index: u32,
-        config_lines: Vec<ConfigLine>,
-    ) -> ProgramResult {
+        config_lines: Vec<ConfigLine>, ) -> ProgramResult {
         let config = &mut ctx.accounts.config;
         let account = config.to_account_info();
         let current_count = get_config_count(&account.data.borrow())?;
@@ -368,13 +383,23 @@ pub mod nft_candy_machine {
     pub fn initialize_candy_machine(
         ctx: Context<InitializeCandyMachine>,
         bump: u8,
-        data: CandyMachineData,
-    ) -> ProgramResult {
+        data: CandyMachineData,) -> ProgramResult {
         let candy_machine = &mut ctx.accounts.candy_machine;
 
         if data.uuid.len() != 6 {
             return Err(ErrorCode::UuidMustBeExactly6Length.into());
         }
+
+        if data.total_unlocked.len() != data.prices.len() {
+            return Err(ErrorCode::PriceAndUnlocksMismatch.into());
+        }
+
+        for i in 1..data.total_unlocked.len() {
+            if data.total_unlocked[i] < data.total_unlocked[i-1] {
+                return Err(ErrorCode::DecreasingTotalUnlocked.into());
+            }
+        }
+
         candy_machine.data = data;
         candy_machine.wallet = *ctx.accounts.wallet.key;
         candy_machine.authority = *ctx.accounts.authority.key;
@@ -513,9 +538,11 @@ pub struct CandyMachine {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
 pub struct CandyMachineData {
     pub uuid: String,
-    pub price: u64,
+    pub prices: Vec<u64>,
     pub items_available: u64,
-    pub go_live_date: Option<i64>,
+    pub total_unlocked: Vec<u64>,
+    pub airdrop_amount: u64,
+    pub current_phase: i64,
 }
 
 pub const CONFIG_ARRAY_START: usize = 32 + // authority
@@ -559,8 +586,7 @@ pub fn get_config_count(data: &Ref<&mut [u8]>) -> core::result::Result<usize, Pr
 
 pub fn get_config_line(
     a: &AccountInfo,
-    index: usize,
-) -> core::result::Result<ConfigLine, ProgramError> {
+    index: usize,) -> core::result::Result<ConfigLine, ProgramError> {
     let arr = a.data.borrow();
 
     let total = get_config_count(&arr)?;
@@ -624,4 +650,10 @@ pub enum ErrorCode {
     CandyMachineNotLiveYet,
     #[msg("Number of config lines must be at least number of items available")]
     ConfigLineMismatch,
+    #[msg("Airdrop can only be triggered by candy machine owner")]
+    AirdropIncorrectCaller,
+    #[msg("The array length of prices must be equal to that of total unlocked")]
+    PriceAndUnlocksMismatch,
+    #[msg("Total unlocked must be monotonically increasing (no removal of tokens from total supply)")]
+    DecreasingTotalUnlocked,
 }

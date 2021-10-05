@@ -32,6 +32,7 @@ import { signAllMetadataFromCandyMachine } from './commands/signAll';
 import log from 'loglevel';
 import { createMetadataFiles } from './helpers/metadata';
 import { createGenerativeArt } from './commands/createArt';
+import assert from 'assert';
 
 program.version('0.0.2');
 
@@ -367,7 +368,6 @@ programCommand('show')
         candyMachine,
       );
       log.info('...Candy Machine...');
-      log.info('Key:', candyMachine.toBase58());
       //@ts-ignore
       log.info('authority: ', machine.authority.toBase58());
       //@ts-ignore
@@ -424,9 +424,16 @@ programCommand('show')
 
 programCommand('create_candy_machine')
   .option(
-    '-p, --price <string>',
-    'Price denominated in SOL or spl-token override',
-    '1',
+    '-p, --prices <string>',
+    'Prices denominated in SOL or spl-token override, delimited by comma. e.g. 1,2 ',
+  )
+  .requiredOption(
+    '-u, --unlocks <string>', // Cannot be modified to prevent rugpull
+    'The total available supply at each phase, delimited by comma. Must be monotonically increasing.'
+  )
+  .requiredOption(
+    '-d, --airdrop <string>', // Cannot be modified to prevent rugpull
+    'Specify the airdrop amount.'
   )
   .option(
     '-t, --spl-token <string>',
@@ -444,69 +451,34 @@ programCommand('create_candy_machine')
     const {
       keypair,
       env,
-      price,
+      prices,
+      unlocks,
+      airdrop,
       cacheName,
       splToken,
       splTokenAccount,
       solTreasuryAccount,
     } = cmd.opts();
 
-    let parsedPrice = parsePrice(price);
+    let parsedUnlocks =  unlocks.split(',').map(unlock => new anchor.BN(unlock)) ;
+
+    
+    let parsedPrices = prices ? prices
+    .split(',')
+    .map(price => new anchor.BN(parsePrice(price))) : Array<number>(parsedUnlocks.length).fill(0);
+    assert(parsedPrices.length == parsedUnlocks.length, "The number of elements in unlocks and prices must match up.")
+
+    let parsedAirdrop = new anchor.BN(airdrop);
+
     const cacheContent = loadCache(cacheName, env);
 
     const walletKeyPair = loadWalletKey(keypair);
+
     const anchorProgram = await loadCandyProgram(walletKeyPair, env);
+
 
     let wallet = walletKeyPair.publicKey;
     const remainingAccounts = [];
-    if (splToken || splTokenAccount) {
-      if (solTreasuryAccount) {
-        throw new Error(
-          'If spl-token-account or spl-token is set then sol-treasury-account cannot be set',
-        );
-      }
-      if (!splToken) {
-        throw new Error(
-          'If spl-token-account is set, spl-token must also be set',
-        );
-      }
-      const splTokenKey = new PublicKey(splToken);
-      const splTokenAccountKey = new PublicKey(splTokenAccount);
-      if (!splTokenAccount) {
-        throw new Error(
-          'If spl-token is set, spl-token-account must also be set',
-        );
-      }
-
-      const token = new Token(
-        anchorProgram.provider.connection,
-        splTokenKey,
-        TOKEN_PROGRAM_ID,
-        walletKeyPair,
-      );
-
-      const mintInfo = await token.getMintInfo();
-      if (!mintInfo.isInitialized) {
-        throw new Error(`The specified spl-token is not initialized`);
-      }
-      const tokenAccount = await token.getAccountInfo(splTokenAccountKey);
-      if (!tokenAccount.isInitialized) {
-        throw new Error(`The specified spl-token-account is not initialized`);
-      }
-      if (!tokenAccount.mint.equals(splTokenKey)) {
-        throw new Error(
-          `The spl-token-account's mint (${tokenAccount.mint.toString()}) does not match specified spl-token ${splTokenKey.toString()}`,
-        );
-      }
-
-      wallet = splTokenAccountKey;
-      parsedPrice = parsePrice(price, 10 ** mintInfo.decimals);
-      remainingAccounts.push({
-        pubkey: splTokenKey,
-        isWritable: false,
-        isSigner: false,
-      });
-    }
 
     if (solTreasuryAccount) {
       wallet = new PublicKey(solTreasuryAccount);
@@ -517,13 +489,16 @@ programCommand('create_candy_machine')
       config,
       cacheContent.program.uuid,
     );
+
     await anchorProgram.rpc.initializeCandyMachine(
       bump,
       {
         uuid: cacheContent.program.uuid,
-        price: new anchor.BN(parsedPrice),
+        prices: parsedPrices,
+        totalUnlocked: parsedUnlocks,
         itemsAvailable: new anchor.BN(Object.keys(cacheContent.items).length),
-        goLiveDate: null,
+        airdropAmount: parsedAirdrop,
+        currentPhase: new anchor.BN(-1),
       },
       {
         accounts: {
@@ -547,25 +522,25 @@ programCommand('create_candy_machine')
   });
 
 programCommand('update_candy_machine')
-  .option(
-    '-d, --date <string>',
-    'timestamp - eg "04 Dec 1995 00:12:00 GMT" or "now"',
-  )
-  .option('-p, --price <string>', 'SOL price')
+  .option('-c, --currentphase <string>')
+  .option('-p, --prices <string>', 'SOL price')
   .action(async (directory, cmd) => {
-    const { keypair, env, date, price, cacheName } = cmd.opts();
+    const { keypair, env, currentphase, prices, cacheName } = cmd.opts();
     const cacheContent = loadCache(cacheName, env);
 
-    const secondsSinceEpoch = date ? parseDate(date) : null;
-    const lamports = price ? parsePrice(price) : null;
+    let parsedPrices = prices
+      ? prices.split(',').map(price => new anchor.BN(parsePrice(price)))
+      : null;
+
+    let parsedPhase = currentphase ? new anchor.BN(currentphase) : null;
 
     const walletKeyPair = loadWalletKey(keypair);
     const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     const candyMachine = new PublicKey(cacheContent.candyMachineAddress);
     const tx = await anchorProgram.rpc.updateCandyMachine(
-      lamports ? new anchor.BN(lamports) : null,
-      secondsSinceEpoch ? new anchor.BN(secondsSinceEpoch) : null,
+      parsedPrices,
+      parsedPhase,
       {
         accounts: {
           candyMachine,
@@ -574,15 +549,11 @@ programCommand('update_candy_machine')
       },
     );
 
-    cacheContent.startDate = secondsSinceEpoch;
-    saveCache(cacheName, env, cacheContent);
-    if (date)
-      log.info(
-        ` - updated startDate timestamp: ${secondsSinceEpoch} (${date})`,
-      );
-    if (lamports)
-      log.info(` - updated price: ${lamports} lamports (${price} SOL)`);
-    log.info('update_candy_machine finished', tx);
+    // cacheContent.startDate = secondsSinceEpoch;
+    // saveCache(cacheName, env, cacheContent);
+    if (parsedPrices) log.info(` - updated prices: ${parsedPrices} `);
+    if (parsedPhase) log.info(` - updated phase: ${parsedPhase}`);
+    log.info('updated_candy_machine finished', tx);
   });
 
 programCommand('mint_one_token').action(async (directory, cmd) => {

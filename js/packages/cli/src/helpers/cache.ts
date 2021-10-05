@@ -16,6 +16,7 @@ export function loadCache(
   cPath: string = CACHE_PATH,
 ) {
   const path = cachePath(env, cacheName, cPath);
+  console.log(path);
   return fs.existsSync(path)
     ? JSON.parse(fs.readFileSync(path).toString())
     : undefined;
