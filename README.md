@@ -1,3 +1,15 @@
+## Exclusive Candy Machine
+
+This repo builds upon metaplex-foundation/metaplex to provide added functionalities to candy-machine that makes it more practical for NFT drops.
+
+### Added Features
+- Unlocks (incrementing)
+- Airdrop (automatic, and only applicable to phase 0)
+- Whitelist (for each phase)
+
+### Removed Features 
+- Timed go live date
+
 <p align="center">
   <a href="https://metaplex.com">
     <img alt="Metaplex" src="https://metaplex.com/meta.svg" width="250" />
