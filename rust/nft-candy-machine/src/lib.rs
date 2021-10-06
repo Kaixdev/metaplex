@@ -42,6 +42,12 @@ pub mod nft_candy_machine {
             }
         }
 
+        if let Some(whitelist) = &candy_machine.data.whitelisted[candy_machine.data.current_phase as usize] {
+            if !whitelist.contains(&ctx.accounts.payer.key) {
+                return Err(ErrorCode::NotWhitelisted.into());
+            }
+        }
+
         let price : u64 = candy_machine.data.prices[candy_machine.data.current_phase as usize];
         
 
@@ -229,7 +235,9 @@ pub mod nft_candy_machine {
     pub fn update_candy_machine(
         ctx: Context<UpdateCandyMachine>,
         prices: Option<Vec<u64>>,
-        current_phase: Option<i64>,) -> ProgramResult {
+        current_phase: Option<i64>,
+        whitelist_phase: Option<u64>,
+        whitelist_list: Option<Vec<Pubkey>>) -> ProgramResult {
         let candy_machine = &mut ctx.accounts.candy_machine;
 
         if let Some(p) = prices {
@@ -243,6 +251,28 @@ pub mod nft_candy_machine {
             msg!("Current phase changed to {}", cp);
             candy_machine.data.current_phase = cp; 
         }
+
+        if let Some(wp) = whitelist_phase {
+            if let Some(wl) = whitelist_list {
+                
+                if !matches!(&candy_machine.data.whitelisted[wp as usize], Some(_list)) {
+                    candy_machine.data.whitelisted[wp as usize] = Some(Vec::new());
+                }
+
+                if let Some(map) = &mut candy_machine.data.whitelisted[wp as usize] {
+                    for pubkey in wl {
+                        if !map.contains(&pubkey) 
+                        {
+                            map.push(pubkey);
+                        }
+                    }
+                }
+                
+            } else {
+                return Err(ErrorCode::ArgumentMismatch.into()); 
+            }
+        }
+
         Ok(())
     }
 
@@ -541,6 +571,7 @@ pub struct CandyMachineData {
     pub prices: Vec<u64>,
     pub items_available: u64,
     pub total_unlocked: Vec<u64>,
+    pub whitelisted: Vec<Option<Vec<Pubkey>>>,
     pub airdrop_amount: u64,
     pub current_phase: i64,
 }
@@ -656,4 +687,8 @@ pub enum ErrorCode {
     PriceAndUnlocksMismatch,
     #[msg("Total unlocked must be monotonically increasing (no removal of tokens from total supply)")]
     DecreasingTotalUnlocked,
+    #[msg("Account is not whitelisted")]
+    NotWhitelisted,
+    #[msg("Argument mismatch")]
+    ArgumentMismatch,
 }

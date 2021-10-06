@@ -75,6 +75,7 @@ programCommand('upload')
       ipfsInfuraProjectId,
       ipfsInfuraSecret,
       retainAuthority,
+      max,
     } = cmd.opts();
 
     if (storage === 'ipfs' && (!ipfsInfuraProjectId || !ipfsInfuraSecret)) {
@@ -429,11 +430,11 @@ programCommand('create_candy_machine')
   )
   .requiredOption(
     '-u, --unlocks <string>', // Cannot be modified to prevent rugpull
-    'The total available supply at each phase, delimited by comma. Must be monotonically increasing.'
+    'The total available supply at each phase, delimited by comma. Must be monotonically increasing.',
   )
   .requiredOption(
     '-d, --airdrop <string>', // Cannot be modified to prevent rugpull
-    'Specify the airdrop amount.'
+    'Specify the airdrop amount.',
   )
   .option(
     '-t, --spl-token <string>',
@@ -460,13 +461,15 @@ programCommand('create_candy_machine')
       solTreasuryAccount,
     } = cmd.opts();
 
-    let parsedUnlocks =  unlocks.split(',').map(unlock => new anchor.BN(unlock)) ;
+    let parsedUnlocks = unlocks.split(',').map(unlock => new anchor.BN(unlock));
 
-    
-    let parsedPrices = prices ? prices
-    .split(',')
-    .map(price => new anchor.BN(parsePrice(price))) : Array<number>(parsedUnlocks.length).fill(0);
-    assert(parsedPrices.length == parsedUnlocks.length, "The number of elements in unlocks and prices must match up.")
+    let parsedPrices = prices
+      ? prices.split(',').map(price => new anchor.BN(parsePrice(price)))
+      : Array<number>(parsedUnlocks.length).fill(0);
+    assert(
+      parsedPrices.length == parsedUnlocks.length,
+      'The number of elements in unlocks and prices must match up.',
+    );
 
     let parsedAirdrop = new anchor.BN(airdrop);
 
@@ -475,7 +478,6 @@ programCommand('create_candy_machine')
     const walletKeyPair = loadWalletKey(keypair);
 
     const anchorProgram = await loadCandyProgram(walletKeyPair, env);
-
 
     let wallet = walletKeyPair.publicKey;
     const remainingAccounts = [];
@@ -499,6 +501,7 @@ programCommand('create_candy_machine')
         itemsAvailable: new anchor.BN(Object.keys(cacheContent.items).length),
         airdropAmount: parsedAirdrop,
         currentPhase: new anchor.BN(-1),
+        whitelisted: new Array(parsedPrices.length).fill(null),
       },
       {
         accounts: {
@@ -524,10 +527,22 @@ programCommand('create_candy_machine')
 programCommand('update_candy_machine')
   .option('-c, --currentphase <string>')
   .option('-p, --prices <string>', 'SOL price')
-  .action(async (directory, cmd) => {
-    const { keypair, env, currentphase, prices, cacheName } = cmd.opts();
-    const cacheContent = loadCache(cacheName, env);
+  .option('-w, --whitelistp <string> ')
+  .option('-l, --whitelist <string> ')
 
+  .action(async (directory, cmd) => {
+    const {
+      keypair,
+      env,
+      currentphase,
+      prices,
+      whitelistp,
+      whitelist,
+      cacheName,
+    } = cmd.opts();
+    const cacheContent = loadCache(cacheName, env);
+    console.log(cacheName);
+    console.log(cacheContent);
     let parsedPrices = prices
       ? prices.split(',').map(price => new anchor.BN(parsePrice(price)))
       : null;
@@ -538,9 +553,14 @@ programCommand('update_candy_machine')
     const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     const candyMachine = new PublicKey(cacheContent.candyMachineAddress);
+
     const tx = await anchorProgram.rpc.updateCandyMachine(
       parsedPrices,
       parsedPhase,
+      whitelistp ? new anchor.BN(whitelistp) : null,
+      whitelist
+        ? whitelist.split(',').map(l => new anchor.web3.PublicKey(l))
+        : null,
       {
         accounts: {
           candyMachine,

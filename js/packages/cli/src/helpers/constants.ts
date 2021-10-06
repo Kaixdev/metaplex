@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-export const CANDY_MACHINE = 'candy_machine';
+export const CANDY_MACHINE = 'exclusive_candy_machine';
 export const MAX_NAME_LENGTH = 32;
 export const MAX_URI_LENGTH = 200;
 export const MAX_SYMBOL_LENGTH = 10;
@@ -8,7 +8,7 @@ export const ARWEAVE_PAYMENT_WALLET = new PublicKey(
   'HvwC9QSAzvGXhhVrgPmauVwFWcYZhne3hVot9EbHuFTm',
 );
 export const CANDY_MACHINE_PROGRAM_ID = new PublicKey(
-  '9gV6dH7ed2dfpJvJpXLQTor5mXybAJLBSF4eybN5fLth', //'cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ',
+  'EREhVaVcaRdk2wgo2US7YNVRLR8d7pFAQ5k7UaAq8Em4', //'cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ',
 );
 export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
   'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',

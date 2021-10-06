@@ -2,7 +2,7 @@
 url = "https://anchor.projectserum.com"
 
 [provider]
-cluster = "http://127.0.0.1:8899"
+cluster = "devnet"
 wallet = "/mnt/c/Users/Kuan/.config/solana/phantom.json"
 
 [scripts]
